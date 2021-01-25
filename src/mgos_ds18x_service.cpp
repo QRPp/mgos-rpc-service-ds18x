@@ -281,9 +281,7 @@ extern "C" bool mgos_rpc_service_ds18x_init() {
                        ds18x_recall_scratchpad_handler, NULL);
   }
   mg_rpc_add_handler(rpc, "DS18x.Rescan", "", ds18x_rescan_handler, NULL);
-  mg_rpc_add_handler(rpc, "DS18x.SetConf",
-                     "{conf:{auto_save_scratchpad:%B,check_for_conversion:%B,"
-                     "resolution:%u}}",
+  mg_rpc_add_handler(rpc, "DS18x.SetConf", "{" SYS_CONF_FMT_ "}",
                      ds18x_set_conf_handler, NULL);
   mg_rpc_add_handler(rpc, "DS18x.SetDevConf",
                      "{" ADDR_OR_IDX_ "," DEV_CONF_FMT_ "}",
