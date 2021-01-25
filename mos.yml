@@ -1,0 +1,18 @@
+author: QRPp <awesome.walrus+github@gmail.com>
+description: Mongoose OS RPC interface for DallasTemperature Arduino lib
+name: rpc-service-ds18x
+type: lib
+version: 1.0
+manifest_version: 2020-08-02
+
+sources:
+  - src
+
+config_schema:
+  - ["ds18x.rpc", "o", {"title": "DTCL RPC settings"}]
+  - ["ds18x.rpc.enable", "b", true, {"title": "Register RPC methods"}]
+  - ["ds18x.rpc.raw_enable", "b", true, {"title": "Allow+register raw scratchpad operations"}]
+
+libs:
+  - origin: https://github.com/mongoose-os-libs/arduino-dallas-temperature
+  - origin: https://github.com/mongoose-os-libs/rpc-common
