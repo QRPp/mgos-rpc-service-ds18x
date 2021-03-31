@@ -86,9 +86,9 @@ static void ds18x_get_alarms_or_temp_handler(struct mg_rpc_request_info *ri,
                                              void *cb_arg,
                                              struct mg_rpc_frame_info *fi,
                                              struct mg_str args) {
-  bool poll;
-  if (json_scanf(args.p, args.len, ri->args_fmt, &poll) < 1 || poll)
-    ds18x->requestTemperatures();
+  bool poll = true;
+  json_scanf(args.p, args.len, ri->args_fmt, &poll);
+  if (poll) ds18x->requestTemperatures();
   mg_rpc_send_responsef(ri, "[%M]", cb_arg);
 }
 
@@ -125,9 +125,9 @@ static void ds18x_get_dev_temp_handler(struct mg_rpc_request_info *ri,
                                        struct mg_rpc_frame_info *fi,
                                        struct mg_str args) {
   DeviceAddress dev;
-  bool poll;
-  if ((scanf_dev_etc(&dev, &poll) < 2 || poll) &&
-      !ds18x->requestTemperaturesByAddress(dev))
+  bool poll = true;
+  scanf_dev_etc(&dev, &poll);
+  if (poll && !ds18x->requestTemperaturesByAddress(dev))
     send_errorf_return(500, ERR_NCON_UPON, "temperature request");
   int16_t t = ds18x->getTemp(dev);
   if (t == DEVICE_DISCONNECTED_RAW)
