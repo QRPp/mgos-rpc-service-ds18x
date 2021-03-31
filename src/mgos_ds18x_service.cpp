@@ -72,7 +72,7 @@ exit:
 
 static int ds18x_get_dev_temp_prn(struct json_out *o, va_list *ap);
 
-static int ds18x_get_alarms_fmt(struct json_out *o, va_list *ap) {
+static int ds18x_get_alarms_prn(struct json_out *o, va_list *ap) {
   DeviceAddress dev;
   bool nonFirst = false;
   int ret = 0;
@@ -82,13 +82,14 @@ static int ds18x_get_alarms_fmt(struct json_out *o, va_list *ap) {
   return ret;
 }
 
-static void ds18x_get_alarms_handler(struct mg_rpc_request_info *ri,
-                                     void *cb_arg, struct mg_rpc_frame_info *fi,
-                                     struct mg_str args) {
+static void ds18x_get_alarms_or_temp_handler(struct mg_rpc_request_info *ri,
+                                             void *cb_arg,
+                                             struct mg_rpc_frame_info *fi,
+                                             struct mg_str args) {
   bool poll;
   if (json_scanf(args.p, args.len, ri->args_fmt, &poll) < 1 || poll)
     ds18x->requestTemperatures();
-  mg_rpc_send_responsef(ri, "[%M]", ds18x_get_alarms_fmt);
+  mg_rpc_send_responsef(ri, "[%M]", cb_arg);
 }
 
 static void ds18x_get_dev_info_handler(struct mg_rpc_request_info *ri,
@@ -156,15 +157,6 @@ static int ds18x_get_temp_prn(struct json_out *o, va_list *ap) {
                        DEVICE_DISCONNECTED_RAW);
   }
   return ret;
-}
-
-static void ds18x_get_temp_handler(struct mg_rpc_request_info *ri, void *cb_arg,
-                                   struct mg_rpc_frame_info *fi,
-                                   struct mg_str args) {
-  bool poll;
-  if (json_scanf(args.p, args.len, ri->args_fmt, &poll) < 1 || poll)
-    ds18x->requestTemperatures();
-  mg_rpc_send_responsef(ri, "[%M]", ds18x_get_temp_prn);
 }
 
 static void ds18x_read_scratchpad_handler(struct mg_rpc_request_info *ri,
@@ -265,7 +257,8 @@ extern "C" bool mgos_rpc_service_ds18x_init() {
   struct mg_rpc *rpc = mgos_rpc_get_global();
   bool raw_en = mgos_sys_config_get_ds18x_rpc_raw_enable();
   mg_rpc_add_handler(rpc, "DS18x.GetAlarms", TEMP_POLL_FMT,
-                     ds18x_get_alarms_handler, NULL);
+                     ds18x_get_alarms_or_temp_handler,
+                     (void *) ds18x_get_alarms_prn);
   mg_rpc_add_handler(rpc, "DS18x.GetDevInfo", ADDR_OR_IDX,
                      ds18x_get_dev_info_handler, NULL);
   mg_rpc_add_handler(rpc, "DS18x.GetDevTemp",
@@ -273,7 +266,8 @@ extern "C" bool mgos_rpc_service_ds18x_init() {
                      ds18x_get_dev_temp_handler, NULL);
   mg_rpc_add_handler(rpc, "DS18x.GetInfo", "", ds18x_get_info_handler, NULL);
   mg_rpc_add_handler(rpc, "DS18x.GetTemp", TEMP_POLL_FMT,
-                     ds18x_get_temp_handler, NULL);
+                     ds18x_get_alarms_or_temp_handler,
+                     (void *) ds18x_get_temp_prn);
   if (raw_en) {
     mg_rpc_add_handler(rpc, "DS18x.ReadScratchpad", ADDR_OR_IDX,
                        ds18x_read_scratchpad_handler, NULL);
