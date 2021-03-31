@@ -4,9 +4,6 @@
 
 #include "mgos_arduino_dallas_temp.h"
 
-/* Cached mgos_ds18x_get_global(). */
-static DallasTemperature *ds18x;
-
 #define SCRATCHPAD_SIZE 9
 
 /* RPC */
@@ -46,6 +43,7 @@ static DallasTemperature *ds18x;
 static bool dev_by_addr_or_idx_p(struct mg_rpc_request_info *ri,
                                  DeviceAddress *dev, int addrLen,
                                  DeviceAddress *addr, unsigned idx) {
+  DallasTemperature *ds18x = NULL;
   bool ret = false;
 
   if (!addr + (idx == UINT_MAX) != 1)
@@ -59,6 +57,7 @@ static bool dev_by_addr_or_idx_p(struct mg_rpc_request_info *ri,
   } else {
     if (idx > UINT8_MAX)
       send_errorf_exit(400, ERR_NBW_FMT, "", "idx", 0, UINT8_MAX);
+    ds18x = mgos_ds18x_get_global_locked();
     if (!ds18x->getAddress(*dev, idx))
       send_errorf_exit(500, "no device at idx %u", idx);
   }
@@ -67,6 +66,7 @@ static bool dev_by_addr_or_idx_p(struct mg_rpc_request_info *ri,
 
 exit:
   if (addr) free(addr);
+  if (ds18x) mgos_ds18x_put_global_locked();
   return ret;
 }
 
@@ -74,10 +74,11 @@ static int ds18x_get_dev_temp_prn(struct json_out *o, va_list *ap);
 
 static int ds18x_get_alarms_prn(struct json_out *o, va_list *ap) {
   DeviceAddress dev;
+  DallasTemperature *ds18x = va_arg(*ap, DallasTemperature *);
   bool nonFirst = false;
   int ret = 0;
   for (ds18x->resetAlarmSearch(); ds18x->alarmSearch(dev);)
-    ret += json_printf(o, "%M", ds18x_get_dev_temp_prn, &nonFirst, dev,
+    ret += json_printf(o, "%M", ds18x_get_dev_temp_prn, ds18x, &nonFirst, dev,
                        DEVICE_DISCONNECTED_RAW);
   return ret;
 }
@@ -88,8 +89,10 @@ static void ds18x_get_alarms_or_temp_handler(struct mg_rpc_request_info *ri,
                                              struct mg_str args) {
   bool poll = true;
   json_scanf(args.p, args.len, ri->args_fmt, &poll);
+  DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
   if (poll) ds18x->requestTemperatures();
-  mg_rpc_send_responsef(ri, "[%M]", cb_arg);
+  mg_rpc_send_responsef(ri, "[%M]", cb_arg, ds18x);
+  mgos_ds18x_put_global_locked();
 }
 
 static void ds18x_get_dev_info_handler(struct mg_rpc_request_info *ri,
@@ -98,15 +101,19 @@ static void ds18x_get_dev_info_handler(struct mg_rpc_request_info *ri,
                                        struct mg_str args) {
   DeviceAddress dev;
   scanf_dev_etc(&dev);
+  DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
   int8_t ha = ds18x->getHighAlarmTemp(dev);
-  if (ha == DEVICE_DISCONNECTED_C) send_errorf_return(500, ERR_NCON);
+  if (ha == DEVICE_DISCONNECTED_C) send_errorf_exit(500, ERR_NCON);
   mg_rpc_send_responsef(ri, "{addr:%H,parasite_power:%B," DEV_CONF_FMT_ "}",
                         sizeof(dev), dev, ds18x->readPowerSupply(dev), ha,
                         ds18x->getLowAlarmTemp(dev), ds18x->getResolution(dev),
                         ds18x->getUserData(dev));
+exit:
+  mgos_ds18x_put_global_locked();
 }
 
 static int ds18x_get_dev_temp_prn(struct json_out *o, va_list *ap) {
+  DallasTemperature *ds18x = va_arg(*ap, DallasTemperature *);
   bool *nonFirst = va_arg(*ap, bool *);
   DeviceAddress *dev = va_arg(*ap, DeviceAddress *);
   int16_t t = va_arg(*ap, int);
@@ -127,17 +134,22 @@ static void ds18x_get_dev_temp_handler(struct mg_rpc_request_info *ri,
   DeviceAddress dev;
   bool poll = true;
   scanf_dev_etc(&dev, &poll);
+  int16_t t;
+  DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
   if (poll && !ds18x->requestTemperaturesByAddress(dev))
-    send_errorf_return(500, ERR_NCON_UPON, "temperature request");
-  int16_t t = ds18x->getTemp(dev);
-  if (t == DEVICE_DISCONNECTED_RAW)
-    send_errorf_return(500, ERR_NCON_UPON, "state readout");
-  mg_rpc_send_responsef(ri, "%M", ds18x_get_dev_temp_prn, NULL, &dev, t);
+    send_errorf_exit(500, ERR_NCON_UPON, "temperature request");
+  if ((t = ds18x->getTemp(dev)) == DEVICE_DISCONNECTED_RAW)
+    send_errorf_exit(500, ERR_NCON_UPON, "state readout");
+  mg_rpc_send_responsef(ri, "%M", ds18x_get_dev_temp_prn, ds18x, NULL, &dev, t);
+
+exit:
+  mgos_ds18x_put_global_locked();
 }
 
 static void ds18x_get_info_handler(struct mg_rpc_request_info *ri, void *cb_arg,
                                    struct mg_rpc_frame_info *fi,
                                    struct mg_str args) {
+  DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
   mg_rpc_send_responsef(
       ri,
       "{one_wire_devices:%u,ds18x_devices:%u,parasite_power:%B," SYS_CONF_FMT_
@@ -145,15 +157,17 @@ static void ds18x_get_info_handler(struct mg_rpc_request_info *ri, void *cb_arg,
       ds18x->getDeviceCount(), ds18x->getDS18Count(),
       ds18x->isParasitePowerMode(), ds18x->getAutoSaveScratchPad(),
       ds18x->getCheckForConversion(), ds18x->getResolution());
+  mgos_ds18x_put_global_locked();
 }
 
 static int ds18x_get_temp_prn(struct json_out *o, va_list *ap) {
+  DallasTemperature *ds18x = va_arg(*ap, DallasTemperature *);
   bool nonFirst = false;
   int ret = 0;
   for (uint8_t idx = 0; idx < ds18x->getDeviceCount(); idx++) {
     DeviceAddress dev;
     if (!ds18x->getAddress(dev, idx)) continue;
-    ret += json_printf(o, "%M", ds18x_get_dev_temp_prn, &nonFirst, dev,
+    ret += json_printf(o, "%M", ds18x_get_dev_temp_prn, ds18x, &nonFirst, dev,
                        DEVICE_DISCONNECTED_RAW);
   }
   return ret;
@@ -166,9 +180,12 @@ static void ds18x_read_scratchpad_handler(struct mg_rpc_request_info *ri,
   DeviceAddress dev;
   scanf_dev_etc(&dev);
   uint8_t data[SCRATCHPAD_SIZE];
-  if (!ds18x->readScratchPad(dev, data)) send_errorf_return(500, ERR_NCON);
+  if (!mgos_ds18x_get_global_locked()->readScratchPad(dev, data))
+    send_errorf_exit(500, ERR_NCON);
   mg_rpc_send_responsef(ri, "{addr:%H,data:%H}", sizeof(dev), dev, sizeof(data),
                         data);
+exit:
+  mgos_ds18x_put_global_locked();
 }
 
 static void ds18x_recall_scratchpad_handler(struct mg_rpc_request_info *ri,
@@ -177,14 +194,18 @@ static void ds18x_recall_scratchpad_handler(struct mg_rpc_request_info *ri,
                                             struct mg_str args) {
   DeviceAddress dev;
   scanf_dev_etc(&dev);
-  if (!ds18x->recallScratchPad(dev)) send_errorf_return(500, ERR_NCON);
+  if (!mgos_ds18x_get_global_locked()->recallScratchPad(dev))
+    send_errorf_exit(500, ERR_NCON);
   mg_rpc_send_responsef(ri, NULL);
+exit:
+  mgos_ds18x_put_global_locked();
 }
 
 static void ds18x_rescan_handler(struct mg_rpc_request_info *ri, void *cb_arg,
                                  struct mg_rpc_frame_info *fi,
                                  struct mg_str args) {
-  ds18x->begin();
+  mgos_ds18x_get_global_locked()->begin();
+  mgos_ds18x_put_global_locked();
   mg_rpc_send_responsef(ri, NULL);
 }
 
@@ -196,9 +217,11 @@ static void ds18x_set_conf_handler(struct mg_rpc_request_info *ri, void *cb_arg,
     send_errorf_return(400, "conf is required");
   if (res != UINT_MAX && res > UINT8_MAX)
     send_errorf_return(400, ERR_NBW_FMT, "", "resolution", 0, UINT8_MAX);
+  DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
   if (ass != BOOL_INVAL) ds18x->setAutoSaveScratchPad(ass);
   if (cfc != BOOL_INVAL) ds18x->setCheckForConversion(cfc);
   if (res != UINT_MAX) ds18x->setResolution(res);
+  mgos_ds18x_put_global_locked();
   mg_rpc_send_responsef(ri, NULL);
 }
 
@@ -225,10 +248,12 @@ static void ds18x_set_dev_conf_handler(struct mg_rpc_request_info *ri,
   if (ud != INT_MAX && (ud < INT16_MIN || ud > INT16_MAX))
     send_errorf_return(400, ERR_NBW_FMT, "conf.", "user_data", INT16_MIN,
                        INT16_MAX);
+  DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
   if (ha != INT_MAX) ds18x->setHighAlarmTemp(dev, ha);
   if (la != INT_MAX) ds18x->setLowAlarmTemp(dev, la);
   if (res != UINT_MAX) ds18x->setResolution(dev, res);
   if (ud != INT_MAX) ds18x->setUserData(dev, ud);
+  mgos_ds18x_put_global_locked();
   mg_rpc_send_responsef(ri, NULL);
 }
 
@@ -244,15 +269,16 @@ static void ds18x_write_scratchpad_handler(struct mg_rpc_request_info *ri,
   if (dataLen != SCRATCHPAD_SIZE)
     send_errorf_exit(400, "data is %d octets long, need %u", dataLen,
                      SCRATCHPAD_SIZE);
-  ds18x->writeScratchPad(dev, data);
+  mgos_ds18x_get_global_locked()->writeScratchPad(dev, data);
+  mgos_ds18x_put_global_locked();
   mg_rpc_send_responsef(ri, NULL);
 exit:
   free(data);
 }
 
 extern "C" bool mgos_rpc_service_ds18x_init() {
-  ds18x = mgos_ds18x_get_global();
-  if (!ds18x || !mgos_sys_config_get_ds18x_rpc_enable()) return true;
+  if (!mgos_ds18x_get_global() || !mgos_sys_config_get_ds18x_rpc_enable())
+    return true;
 
   struct mg_rpc *rpc = mgos_rpc_get_global();
   bool raw_en = mgos_sys_config_get_ds18x_rpc_raw_enable();
