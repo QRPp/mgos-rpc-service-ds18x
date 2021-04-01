@@ -90,7 +90,12 @@ static void ds18x_get_alarms_or_temp_handler(struct mg_rpc_request_info *ri,
   bool poll = true;
   json_scanf(args.p, args.len, ri->args_fmt, &poll);
   DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
-  if (poll) ds18x->requestTemperatures();
+  if (poll) {
+    bool wfc = ds18x->getWaitForConversion();
+    if (!wfc) ds18x->setWaitForConversion(true);
+    ds18x->requestTemperatures();
+    if (!wfc) ds18x->setWaitForConversion(false);
+  }
   mg_rpc_send_responsef(ri, "[%M]", cb_arg, ds18x);
   mgos_ds18x_put_global_locked();
 }
@@ -136,8 +141,13 @@ static void ds18x_get_dev_temp_handler(struct mg_rpc_request_info *ri,
   scanf_dev_etc(&dev, &poll);
   int16_t t;
   DallasTemperature *ds18x = mgos_ds18x_get_global_locked();
-  if (poll && !ds18x->requestTemperaturesByAddress(dev))
-    send_errorf_exit(500, ERR_NCON_UPON, "temperature request");
+  if (poll) {
+    bool wfc = ds18x->getWaitForConversion();
+    if (!wfc) ds18x->setWaitForConversion(true);
+    bool ret = ds18x->requestTemperaturesByAddress(dev);
+    if (!wfc) ds18x->setWaitForConversion(false);
+    if (!ret) send_errorf_exit(500, ERR_NCON_UPON, "temperature request");
+  }
   if ((t = ds18x->getTemp(dev)) == DEVICE_DISCONNECTED_RAW)
     send_errorf_exit(500, ERR_NCON_UPON, "state readout");
   mg_rpc_send_responsef(ri, "%M", ds18x_get_dev_temp_prn, ds18x, NULL, &dev, t);
