@@ -1,8 +1,10 @@
-#include "mgos.h"
-#include "mgos_config.h"
-#include "mgos_rpc.h"
+#include <limits.h>
 
-#include "mgos_arduino_dallas_temp.h"
+#include <mgos.h>
+#include <mgos_config.h>
+#include <mgos_rpc.h>
+
+#include <mgos_arduino_dallas_temp.h>
 
 #define SCRATCHPAD_SIZE 9
 
